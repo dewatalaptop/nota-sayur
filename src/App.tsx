@@ -1,52 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { firebaseAuth } from "./firebase";
-import { Nota, Product, Profile, createNota, delNota, delProduct, patchNota, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
-import { Mode, NotaItem, fmtKg, itemKg, itemTotal, notaTotal, parseNum, rp } from "./lib/calc";
-import { NotaPrint, Paper, dotsFor, escposBytes, logoDotsFor, notaLines, notaText } from "./lib/escpos";
-import { bitmapToUrl, fileToLogoDataUrl, logoBitmap } from "./lib/logo";
+import { Nota, Product, Profile, delProduct, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
+import { parseNum, rp } from "./lib/calc";
+import type { Paper } from "./lib/escpos";
+import { fileToLogoDataUrl } from "./lib/logo";
+import { NotaEditor, NotaList } from "./NotaScreens";
+import { useLogoBitmap } from "./Receipt";
+import { Settings, useSettings } from "./settings";
 import { btConnect, btConnected, btName, btPrint, btSupported } from "./lib/printer";
-
-const ls = {
-  get: (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* abaikan */ } },
-};
-
-// Lebar kertas tersimpan per perangkat (printer melekat pada HP/perangkat ini).
-// Profil toko (nama, alamat, telp, logo) tersimpan di Firebase agar ikut ke perangkat mana pun.
-function useSettings(profile: Profile) {
-  const [paper, setPaper] = useState<Paper>(ls.get("paper", "32") === "48" ? 48 : 32);
-  useEffect(() => ls.set("paper", String(paper)), [paper]);
-  return { shop: profile, paper, setPaper };
-}
-type Settings = ReturnType<typeof useSettings>;
-
-/** Logo hitam-putih persis seperti yang akan tercetak (dipakai pratinjau & cetak). */
-function useLogoBitmap(logo: string | undefined, paper: Paper) {
-  const [bm, setBm] = useState<Awaited<ReturnType<typeof logoBitmap>> | null>(null);
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    let dead = false;
-    if (!logo) { setBm(null); setUrl(""); return; }
-    logoBitmap(logo, dotsFor(paper), logoDotsFor(paper)).then((b) => { if (!dead) { setBm(b); setUrl(bitmapToUrl(b)); } }).catch(() => { if (!dead) { setBm(null); setUrl(""); } });
-    return () => { dead = true; };
-  }, [logo, paper]);
-  return { bm, url };
-}
-
-/** Pratinjau nota: sama persis dengan hasil cetak (dari notaLines yang sama). */
-export function Receipt({ data, paper, logoUrl }: { data: NotaPrint; paper: Paper; logoUrl: string }) {
-  return (
-    <div className="receipt-wrap">
-      <div className="receipt" style={{ width: `${paper + 4}ch` }}>
-        {logoUrl && <img src={logoUrl} alt="Logo" className="receipt-logo" />}
-        {notaLines(data, paper).map((l, i) => (
-          <div key={i} className={`rl${l.b ? " rb" : ""}${l.big ? " rbig" : ""}`} style={{ textAlign: l.a === "c" ? "center" : "left" }}>{l.t || " "}</div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -104,11 +66,12 @@ function Main({ user }: { user: User }) {
         <h1 className="text-lg font-bold">🥬 {settings.shop.name}</h1>
       </header>
       <main className="px-4">
-        {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} products={products} settings={settings} onBack={() => setOpenId(null)} />
+        {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} products={products} settings={settings} onBack={() => setOpenId(null)} onGoPrices={() => { setOpenId(null); setTab("harga"); }} />
           : <NotaList uid={user.uid} notas={notas} onOpen={setOpenId} />)}
         {tab === "harga" && <Prices uid={user.uid} products={products} />}
-        {tab === "atur" && <SettingsTab settings={settings} user={user} />}      </main>
-      <nav className="no-print fixed bottom-0 left-0 right-0 border-t" style={{ background: "var(--surface)", borderColor: "var(--border)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {tab === "atur" && <SettingsTab settings={settings} user={user} />}
+      </main>
+      {!open && <nav className="no-print fixed bottom-0 left-0 right-0 border-t" style={{ background: "var(--surface)", borderColor: "var(--border)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         <div className="mx-auto flex max-w-xl">
           {([["nota", "🧾", "Nota"], ["harga", "🥕", "Harga"], ["atur", "⚙️", "Atur"]] as const).map(([k, i, l]) => (
             <button key={k} onClick={() => { setTab(k); setOpenId(null); }} className="flex-1 py-3 text-sm font-medium" style={{ color: tab === k ? "var(--brand-600)" : "var(--text-secondary)" }}>
@@ -116,128 +79,7 @@ function Main({ user }: { user: User }) {
             </button>
           ))}
         </div>
-      </nav>
-    </div>
-  );
-}
-
-function NotaList({ uid, notas, onOpen }: { uid: string; notas: Nota[]; onOpen: (id: string) => void }) {
-  const [name, setName] = useState("");
-  const [q, setQ] = useState("");
-  const add = async () => { const n = name.trim(); if (!n) return; setName(""); const r = await createNota(uid, n); onOpen(r.id); };
-  const shown = notas.filter((n) => n.buyer.toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div className="space-y-3">
-      <div className="card flex gap-2">
-        <input className="input flex-1" placeholder="Nama pembeli" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
-        <button className="btn-primary" onClick={add}>+ Nota</button>
-      </div>
-      {notas.length > 5 && <input className="input w-full" placeholder="Cari nama pembeli…" value={q} onChange={(e) => setQ(e.target.value)} />}
-      {shown.length === 0 && <p className="py-10 text-center text-sm" style={{ color: "var(--text-faint)" }}>Belum ada nota. Ketik nama pembeli lalu tekan “+ Nota”.</p>}
-      {shown.map((n) => (
-        <button key={n.id} className="card flex w-full items-center justify-between text-left" onClick={() => onOpen(n.id)}>
-          <div>
-            <div className="font-semibold">{n.buyer}</div>
-            <div className="text-xs" style={{ color: "var(--text-faint)" }}>{n.createdAt ? new Date(n.createdAt).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : ""} · {n.items.length} barang</div>
-          </div>
-          <div className="text-right">
-            <div className="font-bold">{rp(n.total)}</div>
-            <span className="text-xs" style={{ color: n.status === "paid" ? "var(--success-text)" : "var(--warning-text)" }}>{n.status === "paid" ? "Lunas" : "Belum lunas"}</span>
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function NotaEditor({ uid, nota, products, settings, onBack }: { uid: string; nota: Nota; products: Product[]; settings: Settings; onBack: () => void }) {
-  const [pid, setPid] = useState("");
-  const [mode, setMode] = useState<Mode>("rp");
-  const [val, setVal] = useState("");
-  const [paid, setPaid] = useState(nota.paid ? String(nota.paid) : "");
-  const [msg, setMsg] = useState("");
-  const prod = products.find((p) => p.id === (pid || products[0]?.id));
-  const v = parseNum(val);
-  const preview = useMemo(() => {
-    if (!prod || !(v > 0)) return null;
-    const it: NotaItem = { id: "", name: prod.name, pricePerKg: prod.pricePerKg, mode, value: v };
-    return mode === "rp" ? `= ${fmtKg(itemKg(it))}` : `= ${rp(itemTotal(it))}`;
-  }, [prod, v, mode]);
-
-  const save = (items: NotaItem[], extra: Partial<Nota> = {}) => patchNota(uid, nota.id, { items, total: notaTotal(items), ...extra });
-  const addItem = () => {
-    if (!prod || !(v > 0)) return;
-    save([...nota.items, { id: crypto.randomUUID(), name: prod.name, pricePerKg: prod.pricePerKg, mode, value: v }]);
-    setVal("");
-  };
-  const total = notaTotal(nota.items);
-  const printData: NotaPrint = { shop: settings.shop, buyer: nota.buyer, date: nota.createdAt ? new Date(nota.createdAt) : new Date(), no: nota.id.slice(0, 5).toUpperCase(), items: nota.items, paid: parseNum(paid) || undefined };
-  const logo = useLogoBitmap(settings.shop.logo, settings.paper);
-
-  const run = async (fn: () => Promise<void>) => { setMsg(""); try { await fn(); } catch (e: any) { setMsg(e.message); } };
-  const printBt = () => run(async () => { if (!btConnected()) await btConnect(); await btPrint(escposBytes(printData, settings.paper, logo.bm)); setMsg("Terkirim ke printer ✓"); });
-  const shareText = () => run(async () => {
-    const t = notaText(printData, settings.paper);
-    if (navigator.share) await navigator.share({ text: t }); else { await navigator.clipboard.writeText(t); setMsg("Nota disalin ✓"); }
-  });
-
-  return (
-    <div className="space-y-3">
-      <button className="no-print text-sm" style={{ color: "var(--brand-600)" }} onClick={onBack}>← Semua nota</button>
-      <div className="no-print flex items-center justify-between">
-        <h2 className="text-xl font-bold">{nota.buyer}</h2>
-        <button className="text-sm" style={{ color: "var(--error-text)" }} onClick={() => confirm(`Hapus nota ${nota.buyer}?`) && delNota(uid, nota.id).then(onBack)}>Hapus</button>
-      </div>
-
-      <div className="card no-print space-y-3">
-        {products.length === 0 ? <p className="text-sm">Isi dulu daftar sayur & harga di tab <b>Harga</b>.</p> : <>
-          <select className="input w-full" value={prod?.id ?? ""} onChange={(e) => setPid(e.target.value)}>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {rp(p.pricePerKg)}/kg</option>)}
-          </select>
-          <div className="grid grid-cols-2 gap-2">
-            {(["rp", "kg"] as Mode[]).map((m) => (
-              <button key={m} onClick={() => setMode(m)} className={mode === m ? "btn-primary" : "btn-secondary"}>{m === "rp" ? "Per Rupiah" : "Per Kilogram"}</button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input className="input flex-1" inputMode="decimal" placeholder={mode === "rp" ? "Uang pembeli, mis. 1000" : "Berat (kg), mis. 0,5"} value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addItem()} />
-            <button className="btn-primary" onClick={addItem}>Tambah</button>
-          </div>
-          {preview && <p className="text-sm font-medium" style={{ color: "var(--brand-700)" }}>{preview}</p>}
-        </>}
-      </div>
-
-      <div className="card no-print">
-        {nota.items.length === 0 && <p className="text-sm" style={{ color: "var(--text-faint)" }}>Belum ada barang.</p>}
-        {nota.items.map((i) => (
-          <div key={i.id} className="flex items-center justify-between border-b py-2 last:border-0" style={{ borderColor: "var(--border-soft)" }}>
-            <div>
-              <div className="font-medium">{i.name}</div>
-              <div className="text-xs" style={{ color: "var(--text-secondary)" }}>{fmtKg(itemKg(i))} × {rp(i.pricePerKg)}/kg</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <b>{rp(itemTotal(i))}</b>
-              <button className="no-print" aria-label="Hapus barang" style={{ color: "var(--error-text)" }} onClick={() => save(nota.items.filter((x) => x.id !== i.id))}>✕</button>
-            </div>
-          </div>
-        ))}
-        <div className="mt-2 flex justify-between border-t pt-2 text-lg font-bold" style={{ borderColor: "var(--border)" }}><span>TOTAL</span><span>{rp(total)}</span></div>
-        {parseNum(paid) > 0 && <div className="flex justify-between text-sm"><span>Kembali</span><span>{rp(Math.max(0, parseNum(paid) - total))}</span></div>}
-      </div>
-
-      <div className="no-print px-1 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Pratinjau nota (sama dengan hasil cetak)</div>
-      <Receipt data={printData} paper={settings.paper} logoUrl={logo.url} />
-
-      <div className="card no-print space-y-3">
-        <input className="input w-full" inputMode="numeric" placeholder="Uang bayar (opsional, untuk kembalian)" value={paid} onChange={(e) => setPaid(e.target.value)} onBlur={() => patchNota(uid, nota.id, { paid: parseNum(paid) || 0 })} />
-        <div className="grid grid-cols-2 gap-2">
-          <button className="btn-primary" onClick={printBt}>🖨️ Cetak Bluetooth</button>
-          <button className="btn-secondary" onClick={() => window.print()}>Cetak / AirPrint</button>
-          <button className="btn-secondary" onClick={shareText}>Bagikan teks</button>
-          <button className="btn-secondary" onClick={() => patchNota(uid, nota.id, { status: nota.status === "paid" ? "open" : "paid", paid: parseNum(paid) || 0 })}>{nota.status === "paid" ? "Tandai belum lunas" : "✓ Tandai lunas"}</button>
-        </div>
-        {msg && <p className="text-sm" style={{ color: msg.includes("✓") ? "var(--success-text)" : "var(--error-text)" }}>{msg}</p>}
-      </div>
+      </nav>}
     </div>
   );
 }
