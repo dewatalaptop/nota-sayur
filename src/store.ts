@@ -7,7 +7,16 @@ export interface Nota { id: string; buyer: string; items: NotaItem[]; total: num
 
 const root = (uid: string, c: string) => collection(db, "notaSayurUsers", uid, c);
 
-export const subProducts = (uid: string, cb: (p: Product[]) => void) =>
+export interface Profile { name: string; phone: string; address: string; logo?: string }
+export const subProfile = (uid: string, cb: (p: Profile) => void) =>
+  onSnapshot(doc(db, "notaSayurUsers", uid, "profile", "main"), (d) => {
+    const x = (d.data() ?? {}) as Partial<Profile>;
+    cb({ name: x.name ?? "Toko Sayur", phone: x.phone ?? "", address: x.address ?? "", logo: x.logo || undefined });
+  });
+export const saveProfile = (uid: string, p: Profile) =>
+  setDoc(doc(db, "notaSayurUsers", uid, "profile", "main"), { name: p.name, phone: p.phone, address: p.address, logo: p.logo ?? "" });
+
+export const subProducts =(uid: string, cb: (p: Product[]) => void) =>
   onSnapshot(query(root(uid, "products"), orderBy("name")), (s) => cb(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))));
 
 // limit(200): batasi baca. Nota lama tetap aman di Firestore.

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { firebaseAuth } from "./firebase";
-import { Nota, Product, createNota, delNota, delProduct, patchNota, saveProduct, subNotas, subProducts } from "./store";
+import { Nota, Product, Profile, createNota, delNota, delProduct, patchNota, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
 import { Mode, NotaItem, fmtKg, itemKg, itemTotal, notaTotal, parseNum, rp } from "./lib/calc";
-import { NotaPrint, Paper, escposBytes, notaText } from "./lib/escpos";
+import { NotaPrint, Paper, dotsFor, escposBytes, logoDotsFor, notaLines, notaText } from "./lib/escpos";
+import { bitmapToUrl, fileToLogoDataUrl, logoBitmap } from "./lib/logo";
 import { btConnect, btConnected, btName, btPrint, btSupported } from "./lib/printer";
 
 const ls = {
@@ -11,14 +12,41 @@ const ls = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* abaikan */ } },
 };
 
-function useSettings() {
-  const [shop, setShop] = useState(ls.get("shop", "Toko Sayur"));
+// Lebar kertas tersimpan per perangkat (printer melekat pada HP/perangkat ini).
+// Profil toko (nama, alamat, telp, logo) tersimpan di Firebase agar ikut ke perangkat mana pun.
+function useSettings(profile: Profile) {
   const [paper, setPaper] = useState<Paper>(ls.get("paper", "32") === "48" ? 48 : 32);
-  useEffect(() => ls.set("shop", shop), [shop]);
   useEffect(() => ls.set("paper", String(paper)), [paper]);
-  return { shop, setShop, paper, setPaper };
+  return { shop: profile, paper, setPaper };
 }
 type Settings = ReturnType<typeof useSettings>;
+
+/** Logo hitam-putih persis seperti yang akan tercetak (dipakai pratinjau & cetak). */
+function useLogoBitmap(logo: string | undefined, paper: Paper) {
+  const [bm, setBm] = useState<Awaited<ReturnType<typeof logoBitmap>> | null>(null);
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let dead = false;
+    if (!logo) { setBm(null); setUrl(""); return; }
+    logoBitmap(logo, dotsFor(paper), logoDotsFor(paper)).then((b) => { if (!dead) { setBm(b); setUrl(bitmapToUrl(b)); } }).catch(() => { if (!dead) { setBm(null); setUrl(""); } });
+    return () => { dead = true; };
+  }, [logo, paper]);
+  return { bm, url };
+}
+
+/** Pratinjau nota: sama persis dengan hasil cetak (dari notaLines yang sama). */
+export function Receipt({ data, paper, logoUrl }: { data: NotaPrint; paper: Paper; logoUrl: string }) {
+  return (
+    <div className="receipt-wrap">
+      <div className="receipt" style={{ width: `${paper + 4}ch` }}>
+        {logoUrl && <img src={logoUrl} alt="Logo" className="receipt-logo" />}
+        {notaLines(data, paper).map((l, i) => (
+          <div key={i} className={`rl${l.b ? " rb" : ""}${l.big ? " rbig" : ""}`} style={{ textAlign: l.a === "c" ? "center" : "left" }}>{l.t || " "}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -63,7 +91,9 @@ function Main({ user }: { user: User }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [notas, setNotas] = useState<Nota[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const settings = useSettings();
+  const [profile, setProfile] = useState<Profile>({ name: "Toko Sayur", phone: "", address: "" });
+  const settings = useSettings(profile);
+  useEffect(() => subProfile(user.uid, setProfile), [user.uid]);
   useEffect(() => subProducts(user.uid, setProducts), [user.uid]);
   useEffect(() => subNotas(user.uid, setNotas), [user.uid]);
   const open = notas.find((n) => n.id === openId);
@@ -71,14 +101,13 @@ function Main({ user }: { user: User }) {
   return (
     <div className="mx-auto min-h-screen max-w-xl pb-24">
       <header className="no-print sticky top-0 z-10 flex items-center justify-between px-4 py-3" style={{ background: "var(--bg)" }}>
-        <h1 className="text-lg font-bold">🥬 {settings.shop}</h1>
+        <h1 className="text-lg font-bold">🥬 {settings.shop.name}</h1>
       </header>
       <main className="px-4">
         {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} products={products} settings={settings} onBack={() => setOpenId(null)} />
           : <NotaList uid={user.uid} notas={notas} onOpen={setOpenId} />)}
         {tab === "harga" && <Prices uid={user.uid} products={products} />}
-        {tab === "atur" && <SettingsTab settings={settings} user={user} />}
-      </main>
+        {tab === "atur" && <SettingsTab settings={settings} user={user} />}      </main>
       <nav className="no-print fixed bottom-0 left-0 right-0 border-t" style={{ background: "var(--surface)", borderColor: "var(--border)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         <div className="mx-auto flex max-w-xl">
           {([["nota", "🧾", "Nota"], ["harga", "🥕", "Harga"], ["atur", "⚙️", "Atur"]] as const).map(([k, i, l]) => (
@@ -142,10 +171,11 @@ function NotaEditor({ uid, nota, products, settings, onBack }: { uid: string; no
     setVal("");
   };
   const total = notaTotal(nota.items);
-  const printData: NotaPrint = { shop: settings.shop, buyer: nota.buyer, date: nota.createdAt ? new Date(nota.createdAt) : new Date(), items: nota.items, paid: parseNum(paid) || undefined };
+  const printData: NotaPrint = { shop: settings.shop, buyer: nota.buyer, date: nota.createdAt ? new Date(nota.createdAt) : new Date(), no: nota.id.slice(0, 5).toUpperCase(), items: nota.items, paid: parseNum(paid) || undefined };
+  const logo = useLogoBitmap(settings.shop.logo, settings.paper);
 
   const run = async (fn: () => Promise<void>) => { setMsg(""); try { await fn(); } catch (e: any) { setMsg(e.message); } };
-  const printBt = () => run(async () => { if (!btConnected()) await btConnect(); await btPrint(escposBytes(printData, settings.paper)); setMsg("Terkirim ke printer ✓"); });
+  const printBt = () => run(async () => { if (!btConnected()) await btConnect(); await btPrint(escposBytes(printData, settings.paper, logo.bm)); setMsg("Terkirim ke printer ✓"); });
   const shareText = () => run(async () => {
     const t = notaText(printData, settings.paper);
     if (navigator.share) await navigator.share({ text: t }); else { await navigator.clipboard.writeText(t); setMsg("Nota disalin ✓"); }
@@ -177,7 +207,7 @@ function NotaEditor({ uid, nota, products, settings, onBack }: { uid: string; no
         </>}
       </div>
 
-      <div id="print-area" className="card">
+      <div className="card no-print">
         {nota.items.length === 0 && <p className="text-sm" style={{ color: "var(--text-faint)" }}>Belum ada barang.</p>}
         {nota.items.map((i) => (
           <div key={i.id} className="flex items-center justify-between border-b py-2 last:border-0" style={{ borderColor: "var(--border-soft)" }}>
@@ -195,6 +225,9 @@ function NotaEditor({ uid, nota, products, settings, onBack }: { uid: string; no
         {parseNum(paid) > 0 && <div className="flex justify-between text-sm"><span>Kembali</span><span>{rp(Math.max(0, parseNum(paid) - total))}</span></div>}
       </div>
 
+      <div className="no-print px-1 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>Pratinjau nota (sama dengan hasil cetak)</div>
+      <Receipt data={printData} paper={settings.paper} logoUrl={logo.url} />
+
       <div className="card no-print space-y-3">
         <input className="input w-full" inputMode="numeric" placeholder="Uang bayar (opsional, untuk kembalian)" value={paid} onChange={(e) => setPaid(e.target.value)} onBlur={() => patchNota(uid, nota.id, { paid: parseNum(paid) || 0 })} />
         <div className="grid grid-cols-2 gap-2">
@@ -205,7 +238,6 @@ function NotaEditor({ uid, nota, products, settings, onBack }: { uid: string; no
         </div>
         {msg && <p className="text-sm" style={{ color: msg.includes("✓") ? "var(--success-text)" : "var(--error-text)" }}>{msg}</p>}
       </div>
-      <pre className="print-only">{notaText(printData, settings.paper)}</pre>
     </div>
   );
 }
@@ -237,14 +269,56 @@ function Prices({ uid, products }: { uid: string; products: Product[] }) {
   );
 }
 
+function ShopForm({ uid, profile, paper }: { uid: string; profile: Profile; paper: Paper }) {
+  const [d, setD] = useState<Profile>(profile);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  // sinkron saat data dari server tiba, tapi jangan menimpa ketikan yang sedang berjalan
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { if (!dirty) setD(profile); }, [profile, dirty]);
+  const edit = (p: Partial<Profile>) => { setDirty(true); setD((x) => ({ ...x, ...p })); setMsg(""); };
+  const { url } = useLogoBitmap(d.logo, paper);
+  const pick = async (f?: File) => {
+    if (!f) return;
+    try { edit({ logo: await fileToLogoDataUrl(f) }); } catch (e: any) { setMsg(e.message); }
+  };
+  const save = async () => {
+    setBusy(true);
+    try { await saveProfile(uid, { ...d, name: d.name.trim() || "Toko Sayur", phone: d.phone.trim(), address: d.address.trim() }); setDirty(false); setMsg("Tersimpan ✓"); }
+    catch { setMsg("Gagal menyimpan. Periksa koneksi internet."); }
+    setBusy(false);
+  };
+  return (
+    <div className="card space-y-2">
+      <div className="font-medium">Profil usaha (tercetak di nota)</div>
+      <label className="text-sm">Nama usaha</label>
+      <input className="input w-full" value={d.name} onChange={(e) => edit({ name: e.target.value })} />
+      <label className="text-sm">Alamat</label>
+      <textarea className="input w-full" rows={2} placeholder="Mis. Pasar Pagi Blok C No. 12" value={d.address} onChange={(e) => edit({ address: e.target.value })} />
+      <label className="text-sm">Nomor HP / WhatsApp</label>
+      <input className="input w-full" inputMode="tel" placeholder="08xxxxxxxxxx" value={d.phone} onChange={(e) => edit({ phone: e.target.value })} />
+      <label className="text-sm">Logo</label>
+      <div className="flex items-center gap-3">
+        {url ? <img src={url} alt="Logo hitam-putih" style={{ maxWidth: 160, maxHeight: 90, border: "1px solid var(--border)", background: "#fff", borderRadius: 8 }} /> : <div className="text-xs" style={{ color: "var(--text-faint)" }}>Belum ada logo</div>}
+        <div className="flex flex-col gap-2">
+          <label className="btn-secondary cursor-pointer text-center">{d.logo ? "Ganti" : "Pilih gambar"}<input type="file" accept="image/*" hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} /></label>
+          {d.logo && <button className="text-sm" style={{ color: "var(--error-text)" }} onClick={() => edit({ logo: undefined })}>Hapus logo</button>}
+        </div>
+      </div>
+      {d.logo && <p className="text-xs" style={{ color: "var(--text-faint)" }}>Logo otomatis diubah ke hitam-putih agar jelas di printer thermal. Gambar kontras tinggi (tulisan/ikon sederhana) hasilnya paling tajam.</p>}
+      <button className="btn-primary w-full" disabled={busy || !dirty} onClick={save}>{busy ? "Menyimpan…" : "Simpan profil"}</button>
+      {msg && <p className="text-sm" style={{ color: msg.includes("✓") ? "var(--success-text)" : "var(--error-text)" }}>{msg}</p>}
+    </div>
+  );
+}
+
 function SettingsTab({ settings, user }: { settings: Settings; user: User }) {
   const [msg, setMsg] = useState("");
   const [, force] = useState(0);
   return (
     <div className="space-y-3">
+      <ShopForm uid={user.uid} profile={settings.shop} paper={settings.paper} />
       <div className="card space-y-2">
-        <label className="text-sm font-medium">Nama usaha (tercetak di nota)</label>
-        <input className="input w-full" value={settings.shop} onChange={(e) => settings.setShop(e.target.value)} />
         <label className="text-sm font-medium">Lebar kertas printer</label>
         <select className="input w-full" value={settings.paper} onChange={(e) => settings.setPaper(Number(e.target.value) as Paper)}>
           <option value={32}>58 mm (paling umum)</option><option value={48}>80 mm</option>
