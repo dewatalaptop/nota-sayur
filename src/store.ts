@@ -16,13 +16,20 @@ export const subProfile = (uid: string, cb: (p: Profile) => void) =>
 export const saveProfile = (uid: string, p: Profile) =>
   setDoc(doc(db, "notaSayurUsers", uid, "profile", "main"), { name: p.name, phone: p.phone, address: p.address, logo: p.logo ?? "" });
 
-export const subProducts =(uid: string, cb: (p: Product[]) => void) =>
-  onSnapshot(query(root(uid, "products"), orderBy("name")), (s) => cb(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))));
+/** pending = ada tulisan yang belum sampai ke server; cache = data masih dari HP, belum dari server. */
+export interface Meta { pending: boolean; cache: boolean }
+
+export const subProducts = (uid: string, cb: (p: Product[], m: Meta) => void) =>
+  onSnapshot(query(root(uid, "products"), orderBy("name")), { includeMetadataChanges: true }, (s) =>
+    cb(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })), { pending: s.metadata.hasPendingWrites, cache: s.metadata.fromCache }));
 
 // limit(200): batasi baca. Nota lama tetap aman di Firestore.
-export const subNotas = (uid: string, cb: (n: Nota[]) => void) =>
-  onSnapshot(query(root(uid, "notas"), orderBy("createdAt", "desc"), limit(200)), (s) =>
-    cb(s.docs.map((d) => { const x = d.data({ serverTimestamps: "estimate" }) as any; return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() }; })));
+export const subNotas = (uid: string, cb: (n: Nota[], m: Meta) => void) =>
+  onSnapshot(query(root(uid, "notas"), orderBy("createdAt", "desc"), limit(200)), { includeMetadataChanges: true }, (s) =>
+    cb(
+      s.docs.map((d) => { const x = d.data({ serverTimestamps: "estimate" }) as any; return { id: d.id, ...x, createdAt: x.createdAt?.toMillis?.() }; }),
+      { pending: s.metadata.hasPendingWrites, cache: s.metadata.fromCache },
+    ));
 
 export const saveProduct = (uid: string, p: Omit<Product, "id"> & { id?: string }) =>
   p.id ? setDoc(doc(root(uid, "products"), p.id), { name: p.name, pricePerKg: p.pricePerKg }) : addDoc(root(uid, "products"), { name: p.name, pricePerKg: p.pricePerKg });

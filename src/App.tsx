@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import { firebaseAuth } from "./firebase";
-import { Nota, Product, Profile, delProduct, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
+import { Meta, Nota, Product, Profile, delProduct, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
 import { parseNum, rp } from "./lib/calc";
 import type { Paper } from "./lib/escpos";
 import { fileToLogoDataUrl } from "./lib/logo";
@@ -46,6 +46,16 @@ function Login() {
   );
 }
 
+function SyncBadge({ online, pending }: { online: boolean; pending: boolean }) {
+  const [slow, setSlow] = useState(false);
+  // "menunggu" yang berlangsung > 8 detik dianggap macet
+  useEffect(() => { if (!pending) { setSlow(false); return; } const t = setTimeout(() => setSlow(true), 8000); return () => clearTimeout(t); }, [pending]);
+  if (!online) return <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--warning-bg)", color: "var(--warning-text)" }}>📴 Offline — data belum terkirim</span>;
+  if (pending && slow) return <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--error-bg)", color: "var(--error-text)" }}>⚠️ Belum masuk server</span>;
+  if (pending) return <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--warning-bg)", color: "var(--warning-text)" }}>⏳ Menyimpan…</span>;
+  return <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--success-bg)", color: "var(--success-text)" }}>☁️ Tersimpan</span>;
+}
+
 type Tab = "nota" | "harga" | "atur";
 
 function Main({ user }: { user: User }) {
@@ -53,17 +63,22 @@ function Main({ user }: { user: User }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [notas, setNotas] = useState<Nota[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [pm, setPm] = useState<Meta>({ pending: false, cache: true });
+  const [nm, setNm] = useState<Meta>({ pending: false, cache: true });
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => { const f = () => setOnline(navigator.onLine); addEventListener("online", f); addEventListener("offline", f); return () => { removeEventListener("online", f); removeEventListener("offline", f); }; }, []);
   const [profile, setProfile] = useState<Profile>({ name: "Toko Sayur", phone: "", address: "" });
   const settings = useSettings(profile);
   useEffect(() => subProfile(user.uid, setProfile), [user.uid]);
-  useEffect(() => subProducts(user.uid, setProducts), [user.uid]);
-  useEffect(() => subNotas(user.uid, setNotas), [user.uid]);
+  useEffect(() => subProducts(user.uid, (p, m) => { setProducts(p); setPm(m); }), [user.uid]);
+  useEffect(() => subNotas(user.uid, (n, m) => { setNotas(n); setNm(m); }), [user.uid]);
   const open = notas.find((n) => n.id === openId);
 
   return (
     <div className="mx-auto min-h-screen max-w-xl pb-24">
       <header className="no-print sticky top-0 z-10 flex items-center justify-between px-4 py-3" style={{ background: "var(--bg)" }}>
         <h1 className="text-lg font-bold">🥬 {settings.shop.name}</h1>
+        <SyncBadge online={online} pending={pm.pending || nm.pending} />
       </header>
       <main className="px-4">
         {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} products={products} settings={settings} onBack={() => setOpenId(null)} onGoPrices={() => { setOpenId(null); setTab("harga"); }} />
@@ -87,7 +102,8 @@ function Main({ user }: { user: User }) {
 function Prices({ uid, products }: { uid: string; products: Product[] }) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
-  const add = () => { const p = parseNum(price); if (!name.trim() || !(p > 0)) return; saveProduct(uid, { name: name.trim(), pricePerKg: p }); setName(""); setPrice(""); };
+  const [err, setErr] = useState("");
+  const add = () => { const p = parseNum(price); if (!name.trim() || !(p > 0)) return; setErr(""); saveProduct(uid, { name: name.trim(), pricePerKg: p }).catch(() => setErr("Gagal menyimpan ke server. Periksa internet lalu coba lagi.")); setName(""); setPrice(""); };
   return (
     <div className="space-y-3">
       <div className="card space-y-2">
@@ -97,6 +113,7 @@ function Prices({ uid, products }: { uid: string; products: Product[] }) {
           <button className="btn-primary" onClick={add}>Simpan</button>
         </div>
       </div>
+      {err && <p className="text-sm" style={{ color: "var(--error-text)" }}>{err}</p>}
       <p className="px-1 text-xs" style={{ color: "var(--text-faint)" }}>Mengubah harga hanya berlaku untuk nota berikutnya; nota lama tetap memakai harga saat dibuat.</p>
       {products.map((p) => (
         <div key={p.id} className="card flex items-center justify-between">

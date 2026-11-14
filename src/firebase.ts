@@ -12,5 +12,8 @@ const firebaseApp = initializeApp({
 export const firebaseAuth = getAuth(firebaseApp);
 // Cache offline: pasar sering sinyal jelek; baca dari cache = hemat kuota baca Firestore.
 export const db = initializeFirestore(firebaseApp, {
+  // Beberapa browser iPhone (mis. Bluefy) memblokir koneksi streaming Firestore -> tulisan menumpuk
+  // di HP dan tidak pernah sampai ke server. Deteksi otomatis + cadangan long-polling mengatasinya.
+  experimentalAutoDetectLongPolling: true,
   localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }),
 });
