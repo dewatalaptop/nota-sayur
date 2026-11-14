@@ -1,0 +1,110 @@
+/* @import must be the first rule in a stylesheet (CSS spec) — ui-kit.css is
+   plain CSS (no Tailwind directives of its own) so its position relative to
+   @tailwind below doesn't affect what it outputs; --brand-* etc. resolve
+   from the :root block further down regardless of source order, since CSS
+   custom properties are resolved live per-element, not at parse time. See
+   ui-kit.css's own header comment and templates/ui-quality-standard.md. */
+@import "./ui-kit.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Starter design-token system — semantic CSS custom properties, not
+ * hardcoded Tailwind color classes, so every component reads e.g.
+ * `bg-[var(--surface)]` / `text-[var(--text)]` instead of `bg-white
+ * dark:bg-slate-900`. This is what let retail-pos's theming get singled out
+ * by Gemini's UI analysis as avoiding the generic-AI look while staying
+ * dependency-free (see memory ai-app-builder-ui-quality-bar) — copy that
+ * pattern from the start instead of hand-rolling ad-hoc colors per project.
+ *
+ * To re-theme a new project: change ONLY --brand-hue below (and optionally
+ * --brand-saturation/--brand-lightness) — every brand-derived token follows
+ * automatically. Don't hand-pick a new hex palette per project; derive it.
+ */
+:root {
+  color-scheme: light;
+
+  --brand-hue: 142; /* swap this one number to re-theme the whole app */
+  --brand-saturation: 70%;
+  --brand-lightness: 55%;
+
+  --brand-50: hsl(var(--brand-hue), 85%, 96%);
+  --brand-400: hsl(var(--brand-hue), var(--brand-saturation), 65%);
+  --brand-500: hsl(var(--brand-hue), var(--brand-saturation), var(--brand-lightness));
+  --brand-600: hsl(var(--brand-hue), var(--brand-saturation), 45%);
+  --brand-700: hsl(var(--brand-hue), var(--brand-saturation), 36%);
+
+  --bg: hsl(220, 20%, 98%);
+  --surface: #ffffff;
+  --text: hsl(222, 30%, 14%);
+  --text-secondary: hsl(222, 12%, 40%);
+  --text-faint: hsl(222, 10%, 60%);
+  --border: hsl(220, 15%, 90%);
+  --border-soft: hsl(220, 15%, 94%);
+
+  --success-bg: hsl(152, 60%, 94%);
+  --success-text: hsl(152, 55%, 28%);
+  --warning-bg: hsl(43, 90%, 92%);
+  --warning-text: hsl(32, 75%, 34%);
+  --error-bg: hsl(350, 85%, 95%);
+  --error-text: hsl(350, 65%, 42%);
+}
+
+/* System dark mode — only when the user hasn't explicitly picked a theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: hsl(222, 25%, 10%);
+    --surface: hsl(222, 22%, 14%);
+    --text: hsl(220, 20%, 96%);
+    --text-secondary: hsl(220, 12%, 72%);
+    --text-faint: hsl(220, 10%, 52%);
+    --border: hsl(222, 18%, 24%);
+    --border-soft: hsl(222, 18%, 20%);
+    --success-bg: hsl(152, 40%, 16%);
+    --success-text: hsl(152, 55%, 72%);
+    --warning-bg: hsl(38, 40%, 18%);
+    --warning-text: hsl(38, 80%, 70%);
+    --error-bg: hsl(350, 40%, 18%);
+    --error-text: hsl(350, 70%, 75%);
+  }
+}
+
+/* Explicit toggle, if the app has a light/dark switch (wins either way). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: hsl(222, 25%, 10%);
+  --surface: hsl(222, 22%, 14%);
+  --text: hsl(220, 20%, 96%);
+  --text-secondary: hsl(220, 12%, 72%);
+  --text-faint: hsl(220, 10%, 52%);
+  --border: hsl(222, 18%, 24%);
+  --border-soft: hsl(222, 18%, 20%);
+  --success-bg: hsl(152, 40%, 16%);
+  --success-text: hsl(152, 55%, 72%);
+  --warning-bg: hsl(38, 40%, 18%);
+  --warning-text: hsl(38, 80%, 70%);
+  --error-bg: hsl(350, 40%, 18%);
+  --error-text: hsl(350, 70%, 75%);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+.input { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 16px; color: var(--text); min-width: 0; }
+.input:focus { outline: 2px solid var(--brand-400); }
+.card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 16px; padding: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
+.btn-primary, .btn-secondary { border-radius: 12px; padding: 12px 16px; font-weight: 600; font-size: 15px; min-height: 44px; }
+.btn-primary { background: var(--brand-600); color: #fff; }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+button { -webkit-tap-highlight-color: transparent; }
+.print-only { display: none; }
+@media print {
+  .no-print, nav, header, #print-area { display: none !important; }
+  .print-only { display: block; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre; }
+  body { background: #fff; color: #000; }
+}

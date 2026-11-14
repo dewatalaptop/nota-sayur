@@ -1,0 +1,12 @@
+import { itemKg, itemTotal, parseNum, fmtKg, notaTotal } from "./calc.ts";
+const eq = (a: unknown, b: unknown, m: string) => { if (a !== b) { console.error("FAIL", m, a, b); process.exit(1); } };
+const it = (mode: "kg" | "rp", value: number) => ({ id: "1", name: "Bayam", pricePerKg: 5000, mode, value });
+eq(itemKg(it("rp", 1000)), 0.2, "1000 rupiah = 0.2 kg");
+eq(itemTotal(it("rp", 1000)), 1000, "rp total");
+eq(itemKg(it("kg", 1.5)), 1.5, "kg");
+eq(itemTotal(it("kg", 1.5)), 7500, "1.5 kg total");
+eq(itemTotal({ ...it("kg", 0.333), pricePerKg: 7000 }), 2331, "rounding");
+eq(notaTotal([it("rp", 1000), it("kg", 2)]), 11000, "sum");
+eq(parseNum("0,5"), 0.5, "koma"); eq(parseNum("5.000"), 5000, "ribuan"); eq(parseNum("2.5"), 2.5, "titik desimal");
+eq(fmtKg(0.2), "200 gram", "gram");
+console.log("calc OK");
