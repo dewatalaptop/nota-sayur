@@ -22,8 +22,9 @@ export const ls = {
 // Lebar kertas tersimpan per perangkat (printer melekat pada HP/perangkat ini).
 // Profil toko (nama, alamat, telp, logo) tersimpan di Firebase agar ikut ke perangkat mana pun.
 export function useSettings(profile: Profile) {
-  const [paper, setPaper] = useState<Paper>(ls.get("paper", "32") === "48" ? 48 : 32);
-  useEffect(() => ls.set("paper", String(paper)), [paper]);
+  // Kunci baru "paper58": printer pemilik adalah Postech 58 mm, jadi nilai lama (mis. 80 mm) diabaikan.
+  const [paper, setPaper] = useState<Paper>(ls.get("paper58", "32") === "48" ? 48 : 32);
+  useEffect(() => ls.set("paper58", String(paper)), [paper]);
   // "img" = nota gambar (cantik, default); "txt" = teks polos (cepat, cadangan)
   const [style, setStyle] = useState<"img" | "txt">(ls.get("style", "img") === "txt" ? "txt" : "img");
   useEffect(() => ls.set("style", style), [style]);
