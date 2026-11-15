@@ -147,3 +147,8 @@ export function escposBytes(n: NotaPrint, w: Paper, logo?: Bitmap | null): Uint8
   P.push(Uint8Array.of(0x1b, 0x61, 0, 0x1b, 0x45, 0, 0x1d, 0x21, 0, 0x1b, 0x64, 4));
   return cat(P);
 }
+
+/** Cetak seluruh nota sebagai gambar (bitmap penuh selebar kertas). */
+export function escposImageBytes(bm: Bitmap): Uint8Array {
+  return cat([Uint8Array.of(0x1b, 0x40), raster(bm), Uint8Array.of(0x1b, 0x64, 3)]);
+}

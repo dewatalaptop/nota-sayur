@@ -3,7 +3,8 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "f
 import { firebaseAuth } from "./firebase";
 import { Meta, Nota, Product, Profile, delProduct, saveProduct, saveProfile, subNotas, subProducts, subProfile } from "./store";
 import { parseNum, rp } from "./lib/calc";
-import type { Paper } from "./lib/escpos";
+import { NotaPrint, Paper, dotsFor, escposBytes, escposImageBytes } from "./lib/escpos";
+import { renderReceipt } from "./lib/receiptImage";
 import { fileToLogoDataUrl } from "./lib/logo";
 import { NotaEditor, NotaList } from "./NotaScreens";
 import { useLogoBitmap } from "./Receipt";
@@ -81,7 +82,7 @@ function Main({ user }: { user: User }) {
         <SyncBadge online={online} pending={pm.pending || nm.pending} />
       </header>
       <main className="px-4">
-        {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} products={products} settings={settings} onBack={() => setOpenId(null)} onGoPrices={() => { setOpenId(null); setTab("harga"); }} />
+        {tab === "nota" && (open ? <NotaEditor uid={user.uid} nota={open} notas={notas} products={products} settings={settings} onBack={() => setOpenId(null)} onGoPrices={() => { setOpenId(null); setTab("harga"); }} />
           : <NotaList uid={user.uid} notas={notas} onOpen={setOpenId} />)}
         {tab === "harga" && <Prices uid={user.uid} products={products} />}
         {tab === "atur" && <SettingsTab settings={settings} user={user} />}
@@ -171,6 +172,35 @@ function ShopForm({ uid, profile, paper }: { uid: string; profile: Profile; pape
   );
 }
 
+function TestPrint({ settings }: { settings: Settings }) {
+  const logo = useLogoBitmap(settings.shop.logo, settings.paper);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const data: NotaPrint = {
+    shop: settings.shop, buyer: "Contoh Pembeli", date: new Date(), no: "TES-001", paid: 50000,
+    items: [
+      { id: "1", name: "Bayam", pricePerKg: 5000, mode: "rp", value: 1000 },
+      { id: "2", name: "Wortel", pricePerKg: 15000, mode: "kg", value: 1.5 },
+    ],
+  };
+  const go = async () => {
+    setMsg(""); setBusy(true);
+    try {
+      if (!btConnected()) await btConnect();
+      const bm = settings.style === "img" ? renderReceipt(data, dotsFor(settings.paper), logo.bm) : null;
+      await btPrint(bm ? escposImageBytes(bm) : escposBytes(data, settings.paper, logo.bm));
+      setMsg("Nota contoh terkirim ✓");
+    } catch (e: any) { setMsg(e.message); }
+    setBusy(false);
+  };
+  return (
+    <>
+      <button className="btn-secondary w-full" disabled={busy} onClick={go}>{busy ? "Mencetak…" : "🧪 Cetak nota contoh"}</button>
+      {msg && <p className="text-sm" style={{ color: msg.includes("✓") ? "var(--success-text)" : "var(--error-text)" }}>{msg}</p>}
+    </>
+  );
+}
+
 function SettingsTab({ settings, user }: { settings: Settings; user: User }) {
   const [msg, setMsg] = useState("");
   const [, force] = useState(0);
@@ -180,7 +210,14 @@ function SettingsTab({ settings, user }: { settings: Settings; user: User }) {
       <div className="card space-y-2">
         <label className="text-sm font-medium">Lebar kertas printer</label>
         <select className="input w-full" value={settings.paper} onChange={(e) => settings.setPaper(Number(e.target.value) as Paper)}>
-          <option value={32}>58 mm (paling umum)</option><option value={48}>80 mm</option>
+          <option value={32}>58 mm — printer kecil/portabel (Postech, dll)</option>
+          <option value={48}>80 mm — printer kasir besar</option>
+        </select>
+        <p className="text-xs" style={{ color: "var(--text-faint)" }}>Salah pilih membuat nota terpotong atau garisnya patah. Printer portabel kecil hampir selalu 58 mm.</p>
+        <label className="pt-1 text-sm font-medium">Gaya cetak</label>
+        <select className="input w-full" value={settings.style} onChange={(e) => settings.setStyle(e.target.value as "img" | "txt")}>
+          <option value="img">Cantik (gambar) — disarankan</option>
+          <option value="txt">Teks polos (lebih cepat)</option>
         </select>
       </div>
       <div className="card space-y-2">
@@ -189,6 +226,7 @@ function SettingsTab({ settings, user }: { settings: Settings; user: User }) {
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{btConnected() ? `Terhubung: ${btName()}` : "Belum terhubung"}</p>
         <button className="btn-primary w-full" onClick={() => btConnect().then((n) => { setMsg(`Terhubung ke ${n}`); force((x) => x + 1); }).catch((e) => setMsg(e.message))}>Cari & sambungkan printer</button>
         {msg && <p className="text-sm">{msg}</p>}
+        <TestPrint settings={settings} />
       </div>
       <div className="card flex items-center justify-between">
         <span className="text-sm">{user.email?.split("@")[0]}</span>

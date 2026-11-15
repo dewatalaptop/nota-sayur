@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Nota, Product, createNota, delNota, patchNota } from "./store";
 import { Mode, NotaItem, fmtKg, itemKg, itemTotal, notaTotal, parseNum, rp } from "./lib/calc";
-import { NotaPrint, escposBytes, notaText } from "./lib/escpos";
+import { NotaPrint, dotsFor, escposBytes, escposImageBytes, notaText } from "./lib/escpos";
 import { emojiFor } from "./lib/emoji";
 import { btConnect, btConnected, btName, btPrint, btSupported } from "./lib/printer";
-import { Receipt, useLogoBitmap } from "./Receipt";
+import { Receipt, ReceiptImage, useLogoBitmap, useReceiptImage } from "./Receipt";
 import { Settings, ls } from "./settings";
 
 /* ───────────────────────── Daftar nota ───────────────────────── */
@@ -182,12 +182,21 @@ function AmountSheet({
   );
 }
 
+/** Nomor nota: urutan pada hari yang sama, mis. 1515-003 (tgl-bln, urutan). */
+export function notaNo(nota: Nota, notas: Nota[]): string {
+  const d = nota.createdAt ? new Date(nota.createdAt) : new Date();
+  const day = d.toDateString();
+  const same = notas.filter((n) => n.createdAt && new Date(n.createdAt).toDateString() === day && n.createdAt <= (nota.createdAt ?? Infinity));
+  const seq = Math.max(1, same.length);
+  return `${String(d.getDate()).padStart(2, "0")}${String(d.getMonth() + 1).padStart(2, "0")}-${String(seq).padStart(3, "0")}`;
+}
+
 /* ───────────────────────── Layar nota ───────────────────────── */
 
 export function NotaEditor({
-  uid, nota, products, settings, onBack, onGoPrices,
+  uid, nota, notas, products, settings, onBack, onGoPrices,
 }: {
-  uid: string; nota: Nota; products: Product[]; settings: Settings; onBack: () => void; onGoPrices: () => void;
+  uid: string; nota: Nota; notas: Nota[]; products: Product[]; settings: Settings; onBack: () => void; onGoPrices: () => void;
 }) {
   const [picking, setPicking] = useState<Product | null>(null);
   const [editing, setEditing] = useState<NotaItem | null>(null);
@@ -204,9 +213,10 @@ export function NotaEditor({
   const logo = useLogoBitmap(settings.shop.logo, settings.paper);
   const printData: NotaPrint = {
     shop: settings.shop, buyer: nota.buyer, date: nota.createdAt ? new Date(nota.createdAt) : new Date(),
-    no: nota.id.slice(0, 5).toUpperCase(), items: nota.items, paid: paidN > 0 ? paidN : undefined,
+    no: notaNo(nota, notas), items: nota.items, paid: paidN > 0 ? paidN : undefined,
   };
 
+  const img = useReceiptImage(printData, settings.paper, logo.bm);
   const save = (items: NotaItem[]) => patchNota(uid, nota.id, { items, total: notaTotal(items) });
   const flash = (t: string, ok = true) => { setMsg({ t, ok }); };
 
@@ -217,7 +227,7 @@ export function NotaEditor({
     setPrinting(true);
     try {
       if (!btConnected()) await btConnect();
-      await btPrint(escposBytes(printData, settings.paper, logo.bm));
+      await btPrint(settings.style === "img" && img.bm ? escposImageBytes(img.bm) : escposBytes(printData, settings.paper, logo.bm));
       setPrinted(true);
       flash("Nota sudah dikirim ke printer ✓");
     } catch (e: any) {
@@ -330,7 +340,7 @@ export function NotaEditor({
           <span className="text-base font-semibold">Nota seperti ini yang akan tercetak</span>
         </div>
       </div>
-      <Receipt data={printData} paper={settings.paper} logoUrl={logo.url} />
+      {settings.style === "img" && img.url ? <ReceiptImage url={img.url} paper={settings.paper} /> : <Receipt data={printData} paper={settings.paper} logoUrl={logo.url} />}
 
       <div className="no-print card space-y-2">
         <div className="text-base font-semibold">Cara lain</div>

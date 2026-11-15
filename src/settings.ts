@@ -24,6 +24,9 @@ export const ls = {
 export function useSettings(profile: Profile) {
   const [paper, setPaper] = useState<Paper>(ls.get("paper", "32") === "48" ? 48 : 32);
   useEffect(() => ls.set("paper", String(paper)), [paper]);
-  return { shop: profile, paper, setPaper };
+  // "img" = nota gambar (cantik, default); "txt" = teks polos (cepat, cadangan)
+  const [style, setStyle] = useState<"img" | "txt">(ls.get("style", "img") === "txt" ? "txt" : "img");
+  useEffect(() => ls.set("style", style), [style]);
+  return { shop: profile, paper, setPaper, style, setStyle };
 }
 export type Settings = ReturnType<typeof useSettings>;

@@ -37,13 +37,13 @@ export async function btPrint(bytes: Uint8Array) {
     if (dev?.gatt) { const s = await dev.gatt.connect(); ch = await findWritable(s); }
     if (!ch) throw new Error("Printer belum terhubung.");
   }
-  const size = 100; // aman di bawah MTU umum
+  const size = 120; // aman di bawah MTU umum; nota gambar ~30-40 KB
   try {
     for (let i = 0; i < bytes.length; i += size) {
       const part = bytes.slice(i, i + size);
       if (ch!.properties.writeWithoutResponse) await ch!.writeValueWithoutResponse(part);
       else await ch!.writeValue(part);
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 14));
     }
   } catch {
     throw new Error("Cetak terputus di tengah jalan, nota mungkin tercetak sebagian. Coba cetak ulang.");
